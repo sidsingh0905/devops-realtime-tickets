@@ -1,0 +1,495 @@
+🎫 TICKET #1 — BASTION HOST (DEV ENV)
+📌 Ticket Description (Real-World Style)
+
+From: Security Team
+Environment: DEV
+Title: Secure SSH access to private EC2 instances
+Problem:
+Developers need SSH access to EC2 instances that are deployed in a private subnet, but no EC2 should have a public IP.
+
+
+Internet
+   |
+[ IGW ]
+   |
+Public Subnet (10.0.1.0/24)
+   |
+[Bastion Host]  <-- SSH allowed only from your IP
+   |
+Private Subnet (10.0.2.0/24)
+   |
+[App EC2]  <-- NO public IP
+
+
+🧠 WHY THIS ARCHITECTURE EXISTS (INTERVIEW CORE)
+❓ Why Bastion Host?
+
+Direct SSH to private EC2 is not possible
+
+Public IP on app servers = security risk
+
+Bastion acts as single controlled entry point
+
+👉 Interview line:
+
+“A Bastion Host provides controlled administrative access to private resources without exposing them directly to the internet.”
+
+❓ Why public + private subnet?
+
+Public subnet → resources needing internet access
+
+Private subnet → internal workloads
+
+👉 Interview follow-up:
+
+“By default, private subnets cannot reach the internet.”
+
+🧱 HIGH-LEVEL STEPS (DO NOT SKIP THIS)
+
+Before writing code, memorize this order:
+
+VPC
+
+Subnets (public + private)
+
+Internet Gateway
+
+Route Tables
+
+Security Groups
+
+EC2 (Bastion + App)
+
+⚠️ Interviewers often ask:
+
+“Why this order?”
+
+Answer:
+
+“Because dependencies exist. Subnets need VPC, routes need IGW, EC2 needs subnets and security groups.”
+
+🟢 STEP 1 — VPC (YOU ALREADY STARTED THIS)
+
+📍 terraform/networking/main.tf
+
+resource "aws_vpc" "dev_vpc" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+
+  tags = {
+    Name = "dev-vpc"
+  }
+}
+
+WHY:
+
+/16 gives room for growth
+
+DNS enabled → required for EC2 name resolution
+
+Interviewer cross-question:
+
+Why not /24 for VPC?
+
+Correct answer:
+
+/24 is too small; VPC should allow subnet expansion.
+
+🟢 STEP 2 — SUBNETS (PUBLIC + PRIVATE)
+Public Subnet
+resource "aws_subnet" "public_subnet" {
+  vpc_id                  = aws_vpc.dev_vpc.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "ap-south-1a"
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "dev-public-subnet"
+  }
+}
+
+Private Subnet
+resource "aws_subnet" "private_subnet" {
+  vpc_id            = aws_vpc.dev_vpc.id
+  cidr_block        = "10.0.2.0/24"
+  availability_zone = "ap-south-1a"
+
+  tags = {
+    Name = "dev-private-subnet"
+  }
+}
+
+WHY:
+
+Public subnet auto-assigns public IP
+
+Private subnet does NOT
+
+Interviewer trap:
+
+“Does a subnet become public just by name?”
+
+Correct answer:
+
+“No. A subnet is public only if its route table has a route to an Internet Gateway.”
+
+🟢 STEP 3 — INTERNET GATEWAY
+resource "aws_internet_gateway" "igw" {
+  vpc_id = aws_vpc.dev_vpc.id
+
+  tags = {
+    Name = "dev-igw"
+  }
+}
+
+WHY:
+
+IGW allows internet traffic
+
+Without it → no inbound/outbound internet
+
+Cross-question:
+
+Can private subnet use IGW directly?
+
+Correct:
+
+❌ No — only public subnets should route to IGW.
+
+🟢 STEP 4 — ROUTE TABLES
+Public Route Table
+resource "aws_route_table" "public_rt" {
+  vpc_id = aws_vpc.dev_vpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.igw.id
+  }
+
+  tags = {
+    Name = "public-rt"
+  }
+}
+
+Associate with Public Subnet
+resource "aws_route_table_association" "public_assoc" {
+  subnet_id      = aws_subnet.public_subnet.id
+  route_table_id = aws_route_table.public_rt.id
+}
+
+WHY:
+
+0.0.0.0/0 → all internet traffic
+
+Only public subnet is associated
+
+Interview follow-up:
+
+How many route tables can a subnet have?
+
+Answer:
+
+One.
+
+🟢 STEP 5 — SECURITY GROUPS (MOST ASKED)
+Bastion Security Group
+resource "aws_security_group" "bastion_sg" {
+  name   = "bastion-sg"
+  vpc_id = aws_vpc.dev_vpc.id
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["YOUR_PUBLIC_IP/32"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+App EC2 Security Group
+resource "aws_security_group" "private_ec2_sg" {
+  name   = "private-ec2-sg"
+  vpc_id = aws_vpc.dev_vpc.id
+
+  ingress {
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [aws_security_group.bastion_sg.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+WHY:
+
+App EC2 allows SSH only from Bastion
+
+No CIDR-based access
+
+🔥 Interview GOLD answer:
+
+“We allow security group to security group access instead of CIDR, which is more secure and dynamic.”
+
+🟢 STEP 6 — EC2 INSTANCES
+Bastion Host
+resource "aws_instance" "bastion" {
+  ami                         = "ami-xxxxxxxx"
+  instance_type               = "t2.micro"
+  subnet_id                   = aws_subnet.public_subnet.id
+  associate_public_ip_address = true
+  vpc_security_group_ids      = [aws_security_group.bastion_sg.id]
+  key_name                    = "your-key"
+
+  tags = {
+    Name = "dev-bastion"
+  }
+}
+
+Private App EC2
+resource "aws_instance" "private_ec2" {
+  ami                    = "ami-xxxxxxxx"
+  instance_type          = "t2.micro"
+  subnet_id              = aws_subnet.private_subnet.id
+  vpc_security_group_ids = [aws_security_group.private_ec2_sg.id]
+  key_name               = "your-key"
+
+  tags = {
+    Name = "dev-private-ec2"
+  }
+}
+
+🧠 FINAL INTERVIEW CROSS-QUESTIONS (YOU MUST ANSWER)
+
+Why Bastion over VPN?
+
+Can Bastion be auto-scaled?
+
+How do you harden Bastion security further?
+
+How do you remove Bastion in production?
+
+What happens if Bastion goes down?
+
+👉 If you want, I’ll make you answer these verbally next.
+
+🧪 HOW YOU SHOULD PRACTICE (IMPORTANT)
+DO NOT COPY-PASTE
+
+Instead:
+
+Write code
+
+Break it
+
+Fix it
+
+Explain it aloud
+
+That’s how interview confidence comes.
+
+🛠️ EXECUTION STEPS (FOLLOW THIS ORDER)
+
+Write code step-by-step
+
+terraform init
+
+terraform plan
+
+Review resources
+
+terraform apply
+
+SSH → Bastion → Private EC2
+
+terraform destroy after testing
+
+👉 NEXT MOVE
+
+Reply with:
+
+“Ticket 1 VPC + Subnets done”
+or
+
+Ask doubts in ANY step
+
+Next, we’ll add:
+➡️ NAT Gateway
+➡️ Explain why private subnet needs it
+➡️ Production-grade reasoning
+
+You’re now doing real DevOps, not theory 💪
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+================================
+🎫 TICKET 01 – BASTION HOST SETUP
+================================
+
+Status: ✅ Completed
+Environment: AWS – us-east-1
+Tooling: Terraform, EC2, VPC, Security Groups
+
+📌 Problem Statement
+
+Developers need SSH access to EC2 instances deployed in a private subnet.
+For security reasons, EC2 instances should not have public IP addresses.
+
+🎯 Objective
+
+Enable secure SSH access to private EC2 instances
+
+Prevent direct internet access to application servers
+
+Follow AWS security best practices
+
+
+
+
+🏗️ Architecture Summary
+
+VPC with CIDR 10.0.0.0/16
+
+Public subnet for Bastion Host
+
+Private subnet for application EC2
+
+Internet Gateway attached to VPC
+
+Security Groups with SG-to-SG SSH access
+
+
+
+🔐 Security Design
+
+Bastion Host:
+
+Deployed in public subnet
+
+SSH allowed only from trusted IP
+
+Private EC2:
+
+Deployed in private subnet
+
+SSH allowed only from Bastion Security Group
+
+No public IP assigned
+
+
+🛠️ Implementation Steps
+
+Created VPC and subnets using Terraform
+
+Created Internet Gateway and public route table
+
+Created Bastion Security Group with restricted SSH
+
+Created Private EC2 Security Group allowing SSH only from Bastion SG
+
+Used Terraform data source to fetch latest Amazon Linux 2 AMI
+
+Launched Bastion EC2 in public subnet
+
+Launched Private EC2 in private subnet
+
+
+✅ Validation Performed
+
+Verified private EC2 has no public IP
+
+SSH from local machine → Bastion Host (successful)
+
+SSH from Bastion Host → Private EC2 using private IP (successful)
+
+Direct SSH from local machine → Private EC2 (failed as expected)
+
+
+🧠 Key Learnings
+
+Bastion Host provides secure administrative access
+
+Security Group to Security Group rules are more secure than CIDR-based rules
+
+Ingress controls incoming traffic, egress controls outgoing traffic
+
+Private EC2 instances remain isolated from the internet
+
+
+
+🎤 Interview Talking Points
+
+Why Bastion Host is needed
+
+Difference between Bastion Host and NAT Gateway
+
+Ingress vs Egress in Security Groups
+
+How to validate private subnet security
