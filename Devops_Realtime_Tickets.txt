@@ -493,3 +493,208 @@ Difference between Bastion Host and NAT Gateway
 Ingress vs Egress in Security Groups
 
 How to validate private subnet security
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+🎫 Ticket #4 – CI/CD Pipeline using GitHub Actions (Deploy to EC2)
+📌 Problem Statement
+
+Developers want an automated deployment mechanism so that whenever application code is pushed to GitHub, it gets automatically deployed to an EC2 instance without any manual SSH or file copy.
+
+Key Requirements:
+
+No manual deployment
+
+Secure access to EC2
+
+Deployment should happen only when application code changes
+
+CI/CD should be reliable and repeatable
+
+🏗️ Architecture Overview
+Developer Push → GitHub Repository
+        |
+        v
+GitHub Actions (CI/CD Pipeline)
+        |
+        v
+SSH (Secure Copy + Remote Commands)
+        |
+        v
+EC2 Instance (Nginx serving application)
+
+🧰 Tools & Technologies Used
+
+GitHub Actions – CI/CD orchestration
+
+AWS EC2 (Amazon Linux 2) – Deployment target
+
+Nginx – Web server
+
+SSH / SCP – Secure deployment
+
+GitHub Repository Secrets – Secure credential management
+
+🔐 Security Considerations
+
+No credentials are hardcoded in the repository
+
+SSH private key is stored securely in GitHub Actions Repository Secrets
+
+SSH access is controlled via Security Groups
+
+Secrets are injected only at runtime
+
+🔑 GitHub Secrets Configuration
+
+Configured under:
+
+GitHub Repo → Settings → Secrets and variables → Actions → Repository secrets
+
+Secret Name	Description
+EC2_HOST	Public IPv4 address of EC2
+EC2_USER	SSH username (ec2-user)
+EC2_SSH_KEY	Full private key content (.pem file)
+📂 Repository Structure (Relevant to Ticket #4)
+.github/
+└── workflows/
+    └── deploy.yml
+
+python/
+└── ticket-04-app/
+    └── index.html
+
+⚙️ GitHub Actions Workflow (deploy.yml)
+Trigger Condition
+on:
+  push:
+    paths:
+      - "python/ticket-04-app/**"
+
+
+👉 Pipeline runs only when application code changes, avoiding unnecessary deployments.
+
+Deployment Logic (Core Steps)
+
+Checkout latest code
+
+Configure SSH on GitHub runner
+
+Copy application file to EC2 using SCP
+
+Move file to Nginx web root using sudo
+
+Restart Nginx to reflect changes
+
+Deployment Commands Explained
+run: |
+  scp python/ticket-04-app/index.html ec2-user@${{ secrets.EC2_HOST }}:/tmp/index.html
+
+  ssh ec2-user@${{ secrets.EC2_HOST }} "
+    sudo mv /tmp/index.html /usr/share/nginx/html/index.html
+    sudo systemctl restart nginx
+  "
+
+Why /tmp?
+
+Writable directory
+
+Avoids permission issues
+
+Why sudo?
+
+Nginx web root is owned by root
+
+Why restart Nginx?
+
+Ensures latest content is served
+
+✅ Validation Steps
+
+Push a change to python/ticket-04-app/index.html
+
+Verify workflow execution in GitHub Actions tab
+
+Check deployment logs for success
+
+Open browser:
+
+http://<EC2_PUBLIC_IP>
+
+
+Confirm updated content is visible
+
+❌ Common Issues Faced & Fixes
+Issue: Permission denied (publickey)
+
+Cause:
+
+Incorrect SSH user
+
+Wrong private key in secrets
+
+EC2 launched with a different key pair
+
+Fix:
+
+Verified EC2 SSH user (ec2-user)
+
+Re-added correct PEM content to secrets
+
+Confirmed key pair attached to EC2
+
+Issue: Website not accessible
+
+Cause:
+
+HTTP (80) not allowed in Security Group
+
+Fix:
+
+Added inbound rule for HTTP port 80
+
+Issue: Pipeline didn’t trigger
+
+Cause:
+
+Incorrect paths filter
+
+Fix:
+
+Corrected path to python/ticket-04-app/**
+
+🎯 Outcome
+
+Fully automated CI/CD pipeline implemented
+
+Zero manual deployment steps
+
+Secure and auditable deployment process
+
+Clear separation between infrastructure and deployment logic
+
+🎤 Interview-Ready Summary
+
+“I implemented a GitHub Actions CI/CD pipeline that deploys application changes automatically to an EC2 instance using SSH. Secrets are securely managed at the repository level, and deployments are triggered only when application code changes.”
+
+🧠 Key Learnings
+
+Difference between uses and run in GitHub Actions
+
+Importance of correct SSH user and key management
+
+How CI/CD depends on solid infrastructure baseline
+
+Debugging real-world CI/CD authentication issues
+
