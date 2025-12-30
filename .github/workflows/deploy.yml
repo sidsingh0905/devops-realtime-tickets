@@ -1,0 +1,31 @@
+name: Deploy to EC2
+
+on:
+  push:
+    paths:
+      - "python/ticket-04-app/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy index.html to EC2
+        run: |
+          scp python/ticket-04-app/index.html \
+          ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/index.html
+
+          ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "
+            sudo mv /tmp/index.html /usr/share/nginx/html/index.html
+            sudo systemctl restart nginx
+          "
