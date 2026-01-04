@@ -1,9 +1,45 @@
-name: Deploy to EC2
+# name: Deploy to EC2
+
+# on:
+#   push:
+#     paths:
+#       - "python/ticket-04-app/**"
+
+# jobs:
+#   deploy:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+
+#       - name: Setup SSH
+#         run: |
+#           mkdir -p ~/.ssh
+#           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+#           chmod 600 ~/.ssh/id_rsa
+#           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+#       - name: Deploy index.html to EC2
+#         run: |
+#           scp python/ticket-04-app/index.html \
+#           ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/index.html
+
+#           ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "
+#             sudo mv /tmp/index.html /usr/share/nginx/html/index.html
+#             sudo systemctl restart nginx
+#           "
+
+
+#for ticket 5
+name: Env Based Deployment to EC2
 
 on:
   push:
-    paths:
-      - "python/ticket-04-app/**"
+    branches:
+      - dev
+      - qa
+      - main
 
 jobs:
   deploy:
@@ -18,14 +54,18 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Deploy index.html to EC2
+      - name: Deploy based on branch
         run: |
-          scp python/ticket-04-app/index.html \
-          ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/index.html
+          if [ "${{ github.ref_name }}" = "dev" ]; then
+            TARGET_DIR="/var/www/dev"
+          elif [ "${{ github.ref_name }}" = "qa" ]; then
+            TARGET_DIR="/var/www/qa"
+          else
+            TARGET_DIR="/var/www/prod"
+          fi
 
-          ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "
-            sudo mv /tmp/index.html /usr/share/nginx/html/index.html
-            sudo systemctl restart nginx
-          "
+          scp python/ticket-04-app/index.html \
+          ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:$TARGET_DIR/
+
