@@ -691,10 +691,305 @@ Clear separation between infrastructure and deployment logic
 🧠 Key Learnings
 
 Difference between uses and run in GitHub Actions
-
 Importance of correct SSH user and key management
-
 How CI/CD depends on solid infrastructure baseline
-
 Debugging real-world CI/CD authentication issues
 
+
+
+
+🎫 DevOps Realtime Ticket 5
+Environment-Based Deployment using Ansible + GitHub Actions
+
+📌 Ticket Title
+
+Environment-based CI/CD Deployment (DEV / QA / PROD) using Ansible & GitHub Actions
+
+
+🧾 Business Requirement
+
+The application must be deployed to different environments (DEV, QA, PROD) automatically based on the Git branch.
+Server configuration should be automated and reusable.
+CI/CD pipeline should not perform server-level configuration.
+
+
+🎯 Objectives
+
+Automate server preparation using Ansible
+
+Implement branch-based deployments using GitHub Actions
+
+Maintain environment isolation (DEV / QA / PROD)
+
+Use a single EC2 initially to reduce cost
+
+Follow real-world DevOps best practices
+
+
+🏗 Architecture Overview
+Developer (Local)
+   |
+   |  git push (dev / qa / main)
+   v
+GitHub Actions (CI/CD)
+   |
+   |  SCP over SSH
+   v
+Amazon EC2
+   ├── /var/www/dev
+   ├── /var/www/qa
+   └── /var/www/prod
+
+
+🛠 Solution Approach
+
+The solution was implemented in two layers:
+
+1️⃣ Server Configuration Layer (Ansible)
+2️⃣ Deployment Layer (GitHub Actions)
+
+This separation ensures clean DevOps responsibility boundaries.
+
+
+ART 1: Server Preparation using Ansible
+Why Ansible?
+
+Agentless (uses SSH)
+
+Idempotent
+
+Ideal for OS-level configuration
+
+Keeps CI/CD pipelines lightweight
+
+✅ Ansible Control Node Setup
+
+Installed Ubuntu via WSL on Windows
+
+Installed Ansible using apt
+
+Used Ubuntu as Ansible Control Node
+
+✅ Ansible Inventory Configuration
+[dev]
+98.84.37.49 ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/devops-bastion-key.pem
+
+
+This defines:
+
+Target EC2
+
+SSH user
+
+Private key for authentication
+
+✅ Connectivity Validation
+ansible dev -i inventory -m ping
+
+
+Result:
+
+SUCCESS => ping: pong
+
+
+This confirmed:
+
+SSH connectivity
+
+Correct key usage
+
+EC2 security group configuration
+
+✅ Ansible Playbook (Server Configuration)
+- name: Prepare DEV EC2 for application deployments
+  hosts: dev
+  become: true
+
+  tasks:
+    - name: Update all packages
+      yum:
+        name: "*"
+        state: latest
+
+    - name: Install required packages
+      yum:
+        name:
+          - nginx
+        state: present
+
+    - name: Create environment directories
+      file:
+        path: /var/www/{{ item }}
+        state: directory
+        owner: ec2-user
+        group: ec2-user
+        mode: '0755'
+      loop:
+        - dev
+        - qa
+        - prod
+
+    - name: Start and enable nginx
+      service:
+        name: nginx
+        state: started
+        enabled: true
+
+✅ Outcome of Ansible Execution
+
+Nginx installed and running
+
+Environment directories created:
+
+/var/www/dev
+/var/www/qa
+/var/www/prod
+
+
+Correct ownership & permissions set
+
+Server became deployment-ready
+
+🧠 Key DevOps Principle Applied
+
+Ansible handles configuration, CI/CD handles deployment.
+
+🔹 PART 2: CI/CD using GitHub Actions
+✅ Repository Structure
+.github/workflows/deploy.yml
+python/
+ └── ticket-04-app/
+     └── index.html
+
+✅ GitHub Actions Workflow
+name: Env Based Deployment to EC2
+
+on:
+  push:
+    branches:
+      - dev
+      - qa
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy based on branch
+        run: |
+          if [ "${{ github.ref_name }}" = "dev" ]; then
+            TARGET_DIR="/var/www/dev"
+          elif [ "${{ github.ref_name }}" = "qa" ]; then
+            TARGET_DIR="/var/www/qa"
+          else
+            TARGET_DIR="/var/www/prod"
+          fi
+
+          scp python/ticket-04-app/index.html \
+          ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:$TARGET_DIR/
+
+🔄 How Environment Detection Works
+
+GitHub automatically sets:
+
+github.ref_name = dev | qa | main
+
+
+Deployment directory is selected dynamically
+
+No hardcoding of environment values
+
+🔐 Secrets Used
+
+Configured in GitHub Actions Secrets:
+
+Secret	Description
+EC2_HOST	EC2 public IP
+EC2_USER	ec2-user
+EC2_SSH_KEY	Private SSH key
+🔁 Deployment Flow (End-to-End)
+git push origin dev
+↓
+GitHub Actions triggered
+↓
+Branch detected: dev
+↓
+TARGET_DIR=/var/www/dev
+↓
+Artifact copied to EC2
+
+
+Same logic applies for qa and main.
+
+✅ Validation Performed
+
+GitHub Actions run status checked
+
+Verified files on EC2:
+
+ls /var/www/dev
+ls /var/www/qa
+ls /var/www/prod
+
+
+Confirmed no cross-environment overwrite
+
+Re-ran pipeline using empty commits to validate idempotency
+
+🔄 Environment Promotion Strategy
+git checkout qa
+git merge dev
+git push origin qa
+
+
+This ensures:
+
+DEV validated before QA
+
+Controlled promotion
+
+Audit-friendly Git history
+
+🧠 Interview-Ready Explanation
+
+“We implemented environment-based deployments using GitHub Actions, where branch names dynamically determine the target environment. Ansible was used to standardize server configuration, while CI/CD pipelines focused solely on deployments.”
+
+📈 Benefits Achieved
+
+Zero manual server configuration
+
+Clear separation of concerns
+
+Scalable CI/CD design
+
+Cost-effective single-EC2 approach
+
+Production-aligned DevOps workflow
+
+🔜 Next Planned Enhancements
+
+Ticket 6: Zero-Downtime Deployment (Blue-Green)
+
+Terraform for infra creation
+
+Secrets Manager integration
+
+Docker & ECR
+
+Monitoring & logging
+
+✅ Ticket Status
+
+Status: ✅ Completed
+Outcome: Successful environment-based CI/CD deployment using Ansible & GitHub Actions
